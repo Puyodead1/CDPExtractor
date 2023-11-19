@@ -2,7 +2,7 @@
   "profiles": {
     "CDPExtractor": {
       "commandName": "Project",
-      "commandLineArgs": "\"I:\\TrainzForge\\TPR Skeleton Cars.cdp\""
+      "commandLineArgs": "\"C:\\Users\\Puyodead1\\Downloads\\trainz\\TTX 40FT Thrall Well CarsFT.cdp\""
     }
   }
 }

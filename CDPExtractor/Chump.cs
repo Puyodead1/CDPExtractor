@@ -1,4 +1,9 @@
-﻿using System.Text;
+﻿using Microsoft.VisualBasic;
+using Microsoft.VisualBasic.CompilerServices;
+using System.Globalization;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Text;
 
 namespace CDPExtractor
 {
@@ -8,34 +13,36 @@ namespace CDPExtractor
         private BinaryReader _reader;
         public int FileLength { get; set; }
         public string CurrentAsset { get; set; }
+        public string RootPath { get; set; }
 
         public Chump(string cdpFile)
         {
             using(FileStream fs = new FileStream(cdpFile, FileMode.Open, FileAccess.Read))
             {
+                string text = "\r\n";
+                RootPath = Path.GetDirectoryName(cdpFile);
+
                 _reader = new BinaryReader(fs);
                 ReadHeader();
 
                 int depth = 0;
                 long currentPosition = _reader.BaseStream.Position;
-                StringBuilder stringBuilder = new StringBuilder();
 
                 CurrentAsset = "root";
                 while (_reader.BaseStream.Position != currentPosition + FileLength)
                 {
-                    ParseSubTags(depth, stringBuilder, CurrentAsset);
+                    ParseSubTags(depth, ref text, CurrentAsset);
                 }
 
                 // write to file
-                string output = Path.GetFileNameWithoutExtension(cdpFile) + ".txt";
+                string output = Path.Join(RootPath, Path.GetFileNameWithoutExtension(cdpFile) + ".txt");
                 Console.WriteLine($"Writing to {output}");
-                File.WriteAllText(output, stringBuilder.ToString());
+                File.WriteAllText(output, text);
             }
         }
 
-        private void ParseSubTags(int depth, StringBuilder root, string parent)
+        private void ParseSubTags(int depth, ref string text, string parent)
         {
-            string spacing = new string('\t', depth);
             uint tagLength = _reader.ReadUInt32();
             int tagNameLength = _reader.ReadByte();
             string tagName = Encoding.ASCII.GetString(_reader.ReadBytes(tagNameLength - 1));
@@ -44,41 +51,58 @@ namespace CDPExtractor
 
             int dataLength = (int)(tagLength - tagNameLength - 2);
 
+            text = text + Strings.Space(depth * 2) + tagName;
+
             switch(tagType)
             {
                 case ETagType.Container:
-                    StringBuilder container = new StringBuilder();
-                    container.Append(spacing + tagName + Environment.NewLine + spacing +  "{" + Environment.NewLine);
+                    text = text + "\r\n" + Strings.Space(depth * 2) + "{\r\n";
                     long currentPosition = _reader.BaseStream.Position;
-                    
+
+                    if(parent == "assets")
+                    {
+                        CurrentAsset = tagName;
+                    }
+    
 
                     while (_reader.BaseStream.Position != currentPosition + tagLength - tagNameLength - 2)
                     {
-                        ParseSubTags(depth + 1, container, tagName);
+                        ParseSubTags(depth + 1, ref text, tagName);
                     }
-
-                    container.Append(spacing + "}" + Environment.NewLine);
-                    root.Append(container.ToString());
+                    text = text + Strings.Space(depth * 2) + "}";
                     break;
                 case ETagType.Integer:
+                    text += Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2)));
+                    bool flag = false;
                     for (int i = 0; i < dataLength - 1; i += 4)
                     {
                         int value = _reader.ReadInt32();
-                        root.Append(spacing + $"{tagName}\t{value}");
+                        text = Conversions.ToString(Operators.ConcatenateObject(Operators.ConcatenateObject(text, Interaction.IIf(flag, ",", "")), value.ToString("G", CultureInfo.InvariantCulture)));
+                        flag = true;
                     }
                     break;
                 case ETagType.Float:
+                    text += Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2)));
+                    bool flag2 = false;
                     for (int i = 0; i < dataLength; i += 4)
                     {
                         float value = _reader.ReadSingle();
-                        root.Append(spacing + $"{tagName}\t{value}");
+                        text = Conversions.ToString(Operators.ConcatenateObject(Operators.ConcatenateObject(text, Interaction.IIf(flag2, ",", "")), value.ToString("G", CultureInfo.InvariantCulture)));
+                        flag2 = true;
                     }
                     break;
                 case ETagType.String:
-                    string tagString = Encoding.UTF8.GetString(_reader.ReadBytes(dataLength - 1));
+                    byte[] bytes = _reader.ReadBytes(dataLength - 1);
                     _reader.ReadByte(); // null terminator
-                    
-                    root.Append(spacing + $"{tagName}\t{tagString}");
+
+                    text = string.Concat(new string[]
+                        {
+                            text,
+                            Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2))),
+                            "\"",
+                            Encoding.UTF8.GetString(bytes),
+                            "\""
+                        });
                     break;
                 case ETagType.Binary:
                     byte[] data = _reader.ReadBytes(dataLength);
@@ -96,34 +120,35 @@ namespace CDPExtractor
                     //}
 
                     // write to file CurrentAsset + tagName
-                    string filename = Path.Join(CurrentAsset, tagName);
-                    Console.WriteLine($"Writing {filename}");
-                    Directory.CreateDirectory(Path.GetDirectoryName(filename));
-                    File.WriteAllBytes(filename, data);
+                    //string filename = Path.Join(RootPath, CurrentAsset, tagName);
+                    //Console.WriteLine($"Writing {filename}");
+                    //Directory.CreateDirectory(Path.GetDirectoryName(filename));
+                    //File.WriteAllBytes(filename, data);
 
-                    root.Append(spacing + $"{tagName}\tSNIPPED");
+                    if (CurrentAsset != "root")
+                    {
+                        string kuid_dir = Path.Join(RootPath, CurrentAsset.Replace(">", "").Replace("<", "").Replace(":", "_"));
+                        string path = Path.Join(kuid_dir, tagName);
+                        Directory.CreateDirectory(kuid_dir);
+                        File.WriteAllBytes(path, data);
+                    }
+
+                    text = text + Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2))) + "SNIPPED";
                     break;
                 case ETagType.Null:
                     _reader.ReadBytes(dataLength);
-                    root.Append(spacing + $"{tagName}\tNULL");
+                    text = text + Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2))) + "NULL";
                     break;
                 case ETagType.KUID:
                     byte[] d = _reader.ReadBytes(dataLength);
                     string kuid = BitConverter.ToString(d).Replace("-", "");
-                    root.Append(spacing + $"{tagName}\t{kuid}");
+                    text = text + Strings.Space(Conversions.ToInteger(Interaction.IIf((int)(40 - tagNameLength - 1) - depth * 2 < 2, 2, (int)(40 - tagNameLength - 1) - depth * 2))) + kuid;
                     break;
                 default:
                     throw new Exception("Unknown tag type");
             }
 
-            root.Append(Environment.NewLine);
-
-
-            if (parent == "assets")
-            {
-                CurrentAsset = tagName.Replace("<", "").Replace(">", "").Replace(":", "_");
-                Console.WriteLine($"Found asset: {tagName}");
-            }
+            text += "\r\n";
         }
 
         private void ReadHeader()
