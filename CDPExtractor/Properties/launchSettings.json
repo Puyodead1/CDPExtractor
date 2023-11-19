@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CDPExtractor": {
+      "commandName": "Project",
+      "commandLineArgs": "\"I:\\TrainzForge\\TPR Skeleton Cars.cdp\""
+    }
+  }
+}
